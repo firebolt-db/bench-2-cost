@@ -129,6 +129,19 @@ def generate_html(results: List[Dict], output_path: Path):
     html = f'''<!DOCTYPE html>
 <html lang="en">
 <head>
+    <script>
+      // Block HubSpot from loading if in iframe (run ASAP in head)
+      if (window.self !== window.top) {{
+        // Intercept HubSpot's global object before it loads
+        window.hsConversationsSettings = {{ loadImmediately: false }};
+        window.hsConversationsOnReady = [];
+        // Block the loader
+        Object.defineProperty(window, 'HubSpotConversations', {{
+          get: function() {{ return {{ widget: {{ load: function(){{}}, remove: function(){{}} }} }}; }},
+          set: function() {{}}
+        }});
+      }}
+    </script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Bench2Cost Interactive Benchmark Explorer</title>
@@ -159,14 +172,16 @@ def generate_html(results: List[Dict], output_path: Path):
         }}
         
         .container {{
-            max-width: 1400px;
+            max-width: 100%;
             margin: 0 auto;
+            padding: 0.5rem;
+            box-sizing: border-box;
         }}
         
         h1 {{
-            font-size: 2rem;
+            font-size: 1.1rem;
             font-weight: 600;
-            margin-bottom: 0.5rem;
+            margin-bottom: 0.15rem;
             background: linear-gradient(135deg, #FF6B35, #F7931E);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
@@ -175,42 +190,44 @@ def generate_html(results: List[Dict], output_path: Path):
         
         .subtitle {{
             color: var(--text-secondary);
-            margin-bottom: 2rem;
-            font-size: 1.1rem;
+            margin-bottom: 0.75rem;
+            font-size: 0.8rem;
         }}
         
         .controls {{
             display: flex;
             flex-wrap: wrap;
-            gap: 1rem;
-            margin-bottom: 1.5rem;
-            padding: 1.5rem;
+            gap: 0.5rem;
+            margin-bottom: 0.5rem;
+            padding: 0.5rem;
             background: var(--bg-secondary);
-            border-radius: 12px;
+            border-radius: 6px;
             border: 1px solid var(--border-color);
+            align-items: center;
         }}
         
         .control-group {{
             display: flex;
             align-items: center;
-            gap: 0.75rem;
+            gap: 0.5rem;
         }}
         
         .control-group label {{
-            font-size: 0.875rem;
+            font-size: 0.7rem;
             color: var(--text-secondary);
             font-weight: 500;
+            white-space: nowrap;
         }}
         
         select {{
-            padding: 0.5rem 1rem;
-            border-radius: 8px;
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
             border: 1px solid var(--border-color);
             background: var(--bg-card);
             color: var(--text-primary);
-            font-size: 0.875rem;
+            font-size: 0.7rem;
             cursor: pointer;
-            min-width: 150px;
+            min-width: 90px;
         }}
         
         select:hover {{
@@ -220,20 +237,21 @@ def generate_html(results: List[Dict], output_path: Path):
         .toggle-group {{
             display: flex;
             background: var(--bg-card);
-            border-radius: 8px;
+            border-radius: 6px;
             overflow: hidden;
             border: 1px solid var(--border-color);
         }}
         
         .toggle-btn {{
-            padding: 0.5rem 1rem;
+            padding: 0.2rem 0.4rem;
             border: none;
             background: transparent;
             color: var(--text-secondary);
             cursor: pointer;
-            font-size: 0.875rem;
+            font-size: 0.7rem;
             font-weight: 500;
             transition: all 0.2s;
+            white-space: nowrap;
         }}
         
         .toggle-btn.active {{
@@ -247,21 +265,22 @@ def generate_html(results: List[Dict], output_path: Path):
         }}
         
         .vendor-cards {{
-            display: flex;
-            flex-wrap: wrap;
-            gap: 0.75rem;
-            margin-bottom: 1.5rem;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+            gap: 0.35rem;
+            margin-bottom: 0.75rem;
         }}
         
         .vendor-card {{
             display: flex;
             flex-direction: column;
-            padding: 1rem;
+            padding: 0.5rem;
             background: var(--bg-card);
-            border-radius: 8px;
+            border-radius: 4px;
             border: 2px solid var(--border-color);
-            min-width: 180px;
+            min-width: 0;
             position: relative;
+            font-size: 0.75rem;
         }}
         
         .vendor-card.active {{
@@ -272,20 +291,20 @@ def generate_html(results: List[Dict], output_path: Path):
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 0.75rem;
+            margin-bottom: 0.3rem;
         }}
         
         .vendor-name {{
             font-weight: 600;
-            font-size: 0.9rem;
+            font-size: 0.75rem;
             display: flex;
             align-items: center;
-            gap: 0.5rem;
+            gap: 0.3rem;
         }}
         
         .vendor-dot {{
-            width: 10px;
-            height: 10px;
+            width: 8px;
+            height: 8px;
             border-radius: 50%;
         }}
         
@@ -294,7 +313,7 @@ def generate_html(results: List[Dict], output_path: Path):
             border: none;
             color: var(--text-secondary);
             cursor: pointer;
-            font-size: 1.2rem;
+            font-size: 0.9rem;
             padding: 0;
             line-height: 1;
         }}
@@ -306,73 +325,76 @@ def generate_html(results: List[Dict], output_path: Path):
         .vendor-card select {{
             min-width: auto;
             width: 100%;
-            margin-top: 0.25rem;
+            margin-top: 0.1rem;
+            padding: 0.15rem 0.3rem;
+            font-size: 0.65rem;
         }}
         
         .vendor-card label {{
-            font-size: 0.75rem;
+            font-size: 0.6rem;
             color: var(--text-secondary);
+            margin-top: 0.15rem;
         }}
         
         .chart-container {{
             background: var(--bg-secondary);
-            border-radius: 12px;
+            border-radius: 8px;
             border: 1px solid var(--border-color);
-            padding: 1rem;
-            margin-bottom: 1.5rem;
+            padding: 0.5rem;
+            margin-bottom: 0.75rem;
         }}
         
         #chart {{
             width: 100%;
-            height: 600px;
+            height: 400px;
         }}
         
         .stats-grid {{
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-            gap: 1rem;
-            margin-top: 1.5rem;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 0.5rem;
+            margin-top: 0.75rem;
         }}
         
         .stat-card {{
             background: var(--bg-card);
-            border-radius: 8px;
-            padding: 1.25rem;
+            border-radius: 6px;
+            padding: 0.75rem;
             border: 1px solid var(--border-color);
         }}
         
         .stat-card h3 {{
-            font-size: 0.875rem;
+            font-size: 0.65rem;
             color: var(--text-secondary);
-            margin-bottom: 0.75rem;
+            margin-bottom: 0.4rem;
             text-transform: uppercase;
             letter-spacing: 0.5px;
         }}
         
         .stat-value {{
-            font-size: 1.5rem;
+            font-size: 1rem;
             font-weight: 600;
         }}
         
         .stat-vendor {{
-            font-size: 0.875rem;
+            font-size: 0.65rem;
             color: var(--text-secondary);
-            margin-top: 0.25rem;
+            margin-top: 0.15rem;
         }}
         
         .add-vendor-btn {{
-            padding: 0.75rem 1.5rem;
-            border-radius: 8px;
+            padding: 0.4rem 0.75rem;
+            border-radius: 4px;
             border: 2px dashed var(--border-color);
             background: transparent;
             color: var(--text-secondary);
             cursor: pointer;
-            font-size: 0.875rem;
+            font-size: 0.7rem;
             font-weight: 500;
             transition: all 0.2s;
             display: flex;
             align-items: center;
-            gap: 0.5rem;
+            gap: 0.3rem;
         }}
         
         .add-vendor-btn:hover {{
@@ -505,19 +527,19 @@ def generate_html(results: List[Dict], output_path: Path):
             const configLower = config.toLowerCase();
             
             // Handle node counts with suffix (e.g., "bench2cost_l_co_3n", "bench2cost_l_co_20n")
-            const nodeSuffixMatch = configLower.match(/(\d+)n$/);
+            const nodeSuffixMatch = configLower.match(/(\\d+)n$/);
             if (nodeSuffixMatch) {{
                 return parseInt(nodeSuffixMatch[1]) * 100;
             }}
             
             // Handle ClickHouse configs (e.g., "aws.3.236.parallel_replicas", "aws.20.236.parallel_replicas")
-            const clickhouseMatch = configLower.match(/aws\.(\d+)\./);
+            const clickhouseMatch = configLower.match(/aws\\.(\\d+)\\./);
             if (clickhouseMatch) {{
                 return parseInt(clickhouseMatch[1]) * 100;
             }}
             
             // Handle node counts at start (e.g., "3n", "9n", "20n", "3.236 (PR)")
-            const nodeStartMatch = configLower.match(/^(\d+)/);
+            const nodeStartMatch = configLower.match(/^(\\d+)/);
             if (nodeStartMatch) {{
                 return parseInt(nodeStartMatch[1]) * 100;
             }}
@@ -595,7 +617,7 @@ def generate_html(results: List[Dict], output_path: Path):
                     </span>
                     <button class="remove-btn" onclick="removeVendorCard('${{vendorId}}')">&times;</button>
                 </div>
-                ${{isServerless ? '<span style="color: #8B949E; font-size: 0.8rem;">Serverless</span>' : '<label>Config</label><select onchange="updateVendorConfig(\\'' + vendorId + '\\', this.value)">' + configs.map(c => '<option value="' + c + '"' + (c === config ? ' selected' : '') + '>' + formatConfigName(c) + '</option>').join('') + '</select>'}}
+                ${{isServerless ? '<span style="color: #8B949E; font-size: 0.6rem;">Serverless</span>' : '<label>Config</label><select onchange="updateVendorConfig(\\'' + vendorId + '\\', this.value)">' + configs.map(c => '<option value="' + c + '"' + (c === config ? ' selected' : '') + '>' + formatConfigName(c) + '</option>').join('') + '</select>'}}
                 <label style="margin-top: 0.5rem">Tier</label>
                 <select onchange="updateVendorTier('${{vendorId}}', this.value)">
                     ${{tiers.map(t => `<option value="${{t}}" ${{t === tier ? 'selected' : ''}}>${{t}}</option>`).join('')}}
@@ -609,13 +631,13 @@ def generate_html(results: List[Dict], output_path: Path):
         // Format config name for display
         function formatConfigName(config) {{
             // Handle Firebolt configs: bench2cost_l_co_3n -> Large CO 3 nodes
-            const fireboltMatch = config.match(/bench2cost_l_co_(\d+)n/);
+            const fireboltMatch = config.match(/bench2cost_l_co_(\\d+)n/);
             if (fireboltMatch) {{
                 return `Large CO ${{fireboltMatch[1]}} nodes`;
             }}
             
             // Handle ClickHouse configs: aws.3.236.parallel_replicas -> 3 nodes
-            const clickhouseMatch = config.match(/aws\.(\d+)\..*parallel_replicas/);
+            const clickhouseMatch = config.match(/aws\\.(\\d+)\\..*parallel_replicas/);
             if (clickhouseMatch) {{
                 return `${{clickhouseMatch[1]}} nodes`;
             }}
@@ -1001,6 +1023,46 @@ def generate_html(results: List[Dict], output_path: Path):
         // Initialize
         initializeDefaults();
     </script>
+    
+    <script>
+      if (window.self !== window.top) {{
+        // Aggressive continuous hiding
+        function nukeHubSpot() {{
+          // Remove all HubSpot elements
+          document.querySelectorAll('[id*="hubspot"], [class*="hubspot"], iframe[src*="hubspot"]').forEach(el => {{
+            el.parentNode && el.parentNode.removeChild(el);
+          }});
+          
+          // Remove HubSpot scripts
+          document.querySelectorAll('script[src*="hs-scripts"], script[src*="hubspot"]').forEach(script => {{
+            script.parentNode && script.parentNode.removeChild(script);
+          }});
+        }}
+        
+        // Run immediately and continuously
+        nukeHubSpot();
+        setInterval(nukeHubSpot, 100); // Check every 100ms
+        
+        // Also use MutationObserver
+        new MutationObserver(nukeHubSpot).observe(document.documentElement, {{
+          childList: true,
+          subtree: true
+        }});
+      }}
+    </script>
+
+    <style>
+      /* Nuclear CSS option */
+      [id*="hubspot"],
+      [class*="hubspot"],
+      iframe[src*="hubspot"] {{
+        display: none !important;
+        visibility: hidden !important;
+        pointer-events: none !important;
+        position: absolute !important;
+        left: -9999px !important;
+      }}
+    </style>
 </body>
 </html>
 '''
