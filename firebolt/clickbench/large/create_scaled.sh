@@ -1,15 +1,19 @@
 #!/bin/bash
 set -euo pipefail
 
-# Firebolt Cloud - Create Scaled Tables (10B/100B rows)
+# Firebolt Cloud - Create Scaled Tables (1B/10B/100B rows)
 #
 # Creates scaled versions of the hits table using generate_series() cross join.
-# hits_10b from hits_1b (×10), hits_100b from hits_1b (×100).
+# Each level builds on the previous one (cascading expansion):
 #
-# Table naming:
-#   hits_1b   - Base table (~1B rows, hits × 10)
-#   hits_10b  - 10x scaled (~10B rows, hits_1b × 10)
-#   hits_100b - 100x scaled (~100B rows, hits_1b × 100)
+# Table hierarchy:
+#   hits      (~100M rows) - Base table from clickbench.public.hits
+#   hits_1b   (~1B rows)   - hits × 10
+#   hits_10b  (~10B rows)  - hits_1b × 10
+#   hits_100b (~100B rows) - hits_10b × 10
+#
+# If a source table doesn't exist, it will be created first.
+# Only the target table is dropped and recreated.
 #
 # NOTE: The original 'hits' table is NOT modified.
 #
@@ -21,9 +25,10 @@ set -euo pipefail
 #   FIREBOLT_DATABASE      - Database name
 #
 # Usage:
-#   ./create_scaled.sh 10 --engine ENGINE_NAME     # Create hits_10b (10x rows) from hits_1b
-#   ./create_scaled.sh 100 --engine ENGINE_NAME    # Create hits_100b (100x rows) from hits_1b
-#   ./create_scaled.sh all --engine ENGINE_NAME    # Create both hits_10b and hits_100b
+#   ./create_scaled.sh 1 --engine ENGINE_NAME      # Create hits_1b from hits
+#   ./create_scaled.sh 10 --engine ENGINE_NAME     # Create hits_10b from hits_1b
+#   ./create_scaled.sh 100 --engine ENGINE_NAME    # Create hits_100b from hits_10b
+#   ./create_scaled.sh all --engine ENGINE_NAME    # Create all scaled tables
 
 # Parse arguments
 SCALE=""
@@ -35,7 +40,7 @@ while [[ $# -gt 0 ]]; do
             ENGINE_ARG="$2"
             shift 2
             ;;
-        10|100|all)
+        1|10|100|all)
             SCALE="$1"
             shift
             ;;
@@ -47,16 +52,17 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [ -z "$SCALE" ]; then
-    echo "Usage: ./create_scaled.sh [10|100|all] --engine ENGINE_NAME"
+    echo "Usage: ./create_scaled.sh [1|10|100|all] --engine ENGINE_NAME"
     echo ""
-    echo "  10   - Create hits_10b table (10x rows) from hits_1b"
-    echo "  100  - Create hits_100b table (100x rows) from hits_1b"
-    echo "  all  - Create both hits_10b and hits_100b"
+    echo "  1    - Create hits_1b (~1B rows) from hits × 10"
+    echo "  10   - Create hits_10b (~10B rows) from hits_1b × 10"
+    echo "  100  - Create hits_100b (~100B rows) from hits_10b × 10"
+    echo "  all  - Create all scaled tables in order"
     echo ""
     echo "Options:"
     echo "  --engine ENGINE_NAME  Engine to use for the operation"
     echo ""
-    echo "NOTE: Original 'hits' table is never modified."
+    echo "NOTE: Each level builds on the previous. Missing source tables are created automatically."
     exit 1
 fi
 
@@ -80,7 +86,7 @@ echo "Engine:   $FIREBOLT_ENGINE"
 echo "Database: $FIREBOLT_DATABASE"
 echo "Scale:    $SCALE"
 echo ""
-echo "NOTE: Original 'hits' table will NOT be modified."
+echo "Hierarchy: hits -> hits_1b -> hits_10b -> hits_100b (each 10x)"
 echo ""
 
 # Get access token
@@ -132,38 +138,51 @@ run_sql() {
 # Function to get row count
 get_row_count() {
     local table="$1"
-    local result=$(run_sql "SELECT COUNT(*) as cnt FROM $table")
-    echo "$result" | jq -r '.data[0].cnt // 0'
+    local result=$(run_sql "SELECT COUNT(*) as cnt FROM $table" 2>/dev/null)
+    echo "$result" | jq -r '.data[0].cnt // 0' 2>/dev/null || echo "0"
 }
 
-# Function to create hits_10b
-create_hits_10b() {
-    echo ""
-    echo "=== Creating hits_10b (10x scale) ==="
+# Function to check if table exists
+table_exists() {
+    local table="$1"
+    local result=$(run_sql "SELECT table_name FROM information_schema.tables WHERE table_name = '$table'" 2>/dev/null)
+    local count=$(echo "$result" | jq -r '.data | length' 2>/dev/null || echo "0")
+    [ "$count" -gt 0 ]
+}
+
+# Function to create a scaled table from a source table
+# Args: source_table, target_table, scale_factor
+create_table_from() {
+    local source_table="$1"
+    local target_table="$2"
+    local scale_factor="$3"
     
-    # Check source table exists
-    SOURCE_COUNT=$(get_row_count "hits_1b")
+    echo ""
+    echo "=== Creating $target_table from $source_table (×$scale_factor) ==="
+    
+    # Check source table exists and has data
+    SOURCE_COUNT=$(get_row_count "$source_table")
     if [ "$SOURCE_COUNT" == "0" ] || [ "$SOURCE_COUNT" == "null" ]; then
-        echo "ERROR: hits_1b table is empty or does not exist. Run load_hits.sh first."
+        echo "ERROR: $source_table is empty or does not exist."
         exit 1
     fi
-    echo "Source hits_1b table has $SOURCE_COUNT rows"
+    echo "Source $source_table has $SOURCE_COUNT rows"
     
-    # Calculate target
-    TARGET_COUNT=$((SOURCE_COUNT * 10))
-    echo "Target rows: $TARGET_COUNT"
+    # Calculate expected target
+    EXPECTED_COUNT=$((SOURCE_COUNT * scale_factor))
+    echo "Expected rows: $EXPECTED_COUNT"
     
-    # Drop existing table
-    echo "Dropping existing hits_10b table if exists..."
-    run_sql "DROP TABLE IF EXISTS hits_10b" > /dev/null
+    # Drop existing target table
+    echo "Dropping existing $target_table if exists..."
+    run_sql "DROP TABLE IF EXISTS $target_table" > /dev/null
     
     # Create using generate_series
-    echo "Creating hits_10b with generate_series(1, 10)..."
+    echo "Creating $target_table with generate_series(1, $scale_factor)..."
     LOAD_START=$(date +%s)
     
-    RESULT=$(run_sql "CREATE TABLE hits_10b
+    RESULT=$(run_sql "CREATE TABLE $target_table
 PRIMARY INDEX CounterID, EventDate, UserID, EventTime, WatchID
-AS SELECT hits_1b.* FROM hits_1b, generate_series(1, 10)")
+AS SELECT ${source_table}.* FROM ${source_table}, generate_series(1, $scale_factor)")
     
     # Check for errors
     ERROR=$(echo "$RESULT" | jq -r '.errors[0].description // empty' 2>/dev/null)
@@ -177,61 +196,70 @@ AS SELECT hits_1b.* FROM hits_1b, generate_series(1, 10)")
     echo "Created in ${LOAD_TIME} seconds"
     
     # Get final count
-    FINAL_COUNT=$(get_row_count "hits_10b")
+    FINAL_COUNT=$(get_row_count "$target_table")
     echo "Final rows: $FINAL_COUNT"
     
-    echo "hits_10b table created successfully!"
+    echo "$target_table created successfully!"
 }
 
-# Function to create hits_100b
+# Function to ensure hits_1b exists (creates from hits if needed)
+ensure_hits_1b() {
+    if ! table_exists "hits_1b"; then
+        echo ""
+        echo "hits_1b does not exist. Creating it first..."
+        
+        # Check hits table exists
+        if ! table_exists "hits"; then
+            echo "ERROR: Base 'hits' table does not exist. Load it first."
+            exit 1
+        fi
+        
+        create_table_from "hits" "hits_1b" 10
+    else
+        echo "hits_1b exists ($(get_row_count hits_1b) rows)"
+    fi
+}
+
+# Function to ensure hits_10b exists (creates from hits_1b if needed)
+ensure_hits_10b() {
+    if ! table_exists "hits_10b"; then
+        echo ""
+        echo "hits_10b does not exist. Creating it first..."
+        ensure_hits_1b
+        create_table_from "hits_1b" "hits_10b" 10
+    else
+        echo "hits_10b exists ($(get_row_count hits_10b) rows)"
+    fi
+}
+
+# Create hits_1b: hits × 10
+create_hits_1b() {
+    # Check hits table exists
+    if ! table_exists "hits"; then
+        echo "ERROR: Base 'hits' table does not exist. Load it first."
+        exit 1
+    fi
+    
+    create_table_from "hits" "hits_1b" 10
+}
+
+# Create hits_10b: hits_1b × 10
+create_hits_10b() {
+    ensure_hits_1b
+    create_table_from "hits_1b" "hits_10b" 10
+}
+
+# Create hits_100b: hits_10b × 10
 create_hits_100b() {
-    echo ""
-    echo "=== Creating hits_100b (100x scale) ==="
-    
-    # Check source table exists
-    SOURCE_COUNT=$(get_row_count "hits_1b")
-    if [ "$SOURCE_COUNT" == "0" ] || [ "$SOURCE_COUNT" == "null" ]; then
-        echo "ERROR: hits_1b table is empty or does not exist. Run './load_hits.sh' first."
-        exit 1
-    fi
-    echo "Source hits_1b table has $SOURCE_COUNT rows"
-    
-    # Calculate target
-    TARGET_COUNT=$((SOURCE_COUNT * 100))
-    echo "Target rows: $TARGET_COUNT"
-    
-    # Drop existing table
-    echo "Dropping existing hits_100b table if exists..."
-    run_sql "DROP TABLE IF EXISTS hits_100b" > /dev/null
-    
-    # Create using generate_series (from hits_1b with 100x scale)
-    echo "Creating hits_100b with generate_series(1, 100) from hits_1b..."
-    LOAD_START=$(date +%s)
-    
-    RESULT=$(run_sql "CREATE TABLE hits_100b
-PRIMARY INDEX CounterID, EventDate, UserID, EventTime, WatchID
-AS SELECT hits_1b.* FROM hits_1b, generate_series(1, 100)")
-    
-    # Check for errors
-    ERROR=$(echo "$RESULT" | jq -r '.errors[0].description // empty' 2>/dev/null)
-    if [ -n "$ERROR" ] && [ "$ERROR" != "null" ]; then
-        echo "ERROR: $ERROR"
-        exit 1
-    fi
-    
-    LOAD_END=$(date +%s)
-    LOAD_TIME=$((LOAD_END - LOAD_START))
-    echo "Created in ${LOAD_TIME} seconds"
-    
-    # Get final count
-    FINAL_COUNT=$(get_row_count "hits_100b")
-    echo "Final rows: $FINAL_COUNT"
-    
-    echo "hits_100b table created successfully!"
+    ensure_hits_10b
+    create_table_from "hits_10b" "hits_100b" 10
 }
 
 # Execute based on scale argument
 case "$SCALE" in
+    1)
+        create_hits_1b
+        ;;
     10)
         create_hits_10b
         ;;
@@ -239,6 +267,7 @@ case "$SCALE" in
         create_hits_100b
         ;;
     all)
+        create_hits_1b
         create_hits_10b
         create_hits_100b
         ;;

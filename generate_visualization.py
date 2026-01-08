@@ -483,7 +483,7 @@ def generate_html(results: List[Dict], output_path: Path):
         // Default configurations per scale
         const scaleDefaults = {{
             '1B': {{
-                'Firebolt': {{ config: 'bench2cost_l_co_9n', tier: 'Enterprise' }},
+                'Firebolt': {{ config: 'bench2cost_xl_co_9n', tier: 'Enterprise' }},
                 'ClickHouse Cloud': {{ config: 'aws.9.236.parallel_replicas', tier: 'Enterprise' }},
                 'Snowflake': {{ config: '4xl_enriched', tier: 'enterprise' }},
                 'Databricks': {{ config: 'clickbench_4X-Large_enriched', tier: 'premium' }},
@@ -491,7 +491,7 @@ def generate_html(results: List[Dict], output_path: Path):
                 'Redshift Serverless': {{ config: null, tier: 'Standard' }}
             }},
             '10B': {{
-                'Firebolt': {{ config: 'bench2cost_l_co_20n', tier: 'Enterprise' }},
+                'Firebolt': {{ config: 'bench2cost_xl_co_20n', tier: 'Enterprise' }},
                 'ClickHouse Cloud': {{ config: 'aws.20.236.parallel_replicas', tier: 'Enterprise' }},
                 'Snowflake': {{ config: '4xl_enriched', tier: 'enterprise' }},
                 'Databricks': {{ config: 'clickbench_4X-Large_enriched', tier: 'premium' }},
@@ -499,7 +499,7 @@ def generate_html(results: List[Dict], output_path: Path):
                 'Redshift Serverless': {{ config: null, tier: 'Standard' }}
             }},
             '100B': {{
-                'Firebolt': {{ config: 'bench2cost_l_co_20n', tier: 'Enterprise' }},
+                'Firebolt': {{ config: 'bench2cost_xl_co_20n', tier: 'Enterprise' }},
                 'ClickHouse Cloud': {{ config: 'aws.20.236.parallel_replicas', tier: 'Enterprise' }},
                 'Snowflake': {{ config: '4xl_enriched', tier: 'enterprise' }},
                 'Databricks': {{ config: 'clickbench_4X-Large_enriched', tier: 'premium' }},
@@ -630,10 +630,16 @@ def generate_html(results: List[Dict], output_path: Path):
         
         // Format config name for display
         function formatConfigName(config) {{
-            // Handle Firebolt configs: bench2cost_l_co_3n -> Large CO 3 nodes
-            const fireboltMatch = config.match(/bench2cost_l_co_(\\d+)n/);
-            if (fireboltMatch) {{
-                return `Large CO ${{fireboltMatch[1]}} nodes`;
+            // Handle Firebolt configs: bench2cost_xl_co_3n -> XL CO 3 nodes
+            const fireboltXLMatch = config.match(/bench2cost_xl_co_(\\d+)n/);
+            if (fireboltXLMatch) {{
+                return `XL CO ${{fireboltXLMatch[1]}} nodes`;
+            }}
+            
+            // Handle Firebolt configs: bench2cost_l_co_3n -> L CO 3 nodes
+            const fireboltLMatch = config.match(/bench2cost_l_co_(\\d+)n/);
+            if (fireboltLMatch) {{
+                return `L CO ${{fireboltLMatch[1]}} nodes`;
             }}
             
             // Handle ClickHouse configs: aws.3.236.parallel_replicas -> 3 nodes
@@ -737,7 +743,7 @@ def generate_html(results: List[Dict], output_path: Path):
                 mode: 'markers+text',
                 type: 'scatter',
                 name: `${{d.vendor}} (${{formatConfigName(d.config)}})`,
-                text: [`${{d.vendor}} ${{d.tier}}`],
+                text: [(d.vendor === 'BigQuery' || d.vendor === 'Redshift Serverless') ? d.vendor : `${{d.vendor}} ${{formatConfigName(d.config)}}`],
                 textposition: 'top center',
                 textfont: {{
                     color: '#E6EDF3',
@@ -752,7 +758,7 @@ def generate_html(results: List[Dict], output_path: Path):
                     }}
                 }},
                 hovertemplate: `<b>${{d.vendor}}</b><br>` +
-                    `Config: ${{formatConfigName(d.config)}}<br>` +
+                    `Config: ${{(d.vendor === 'BigQuery' || d.vendor === 'Redshift Serverless') ? 'Serverless' : formatConfigName(d.config)}}<br>` +
                     `Tier: ${{d.tier}}<br>` +
                     `Runtime: %{{x:.2f}}s<br>` +
                     `Cost: $%{{y:.4f}}<extra></extra>`

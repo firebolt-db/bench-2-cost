@@ -1,4 +1,4 @@
-export FIREBOLT_CLIENT_ID="<your firebolt client id>"
-export FIREBOLT_CLIENT_SECRET="<your firebolt client secret>"
-export FIREBOLT_ACCOUNT="<your account name>"
-export FIREBOLT_DATABASE="<target database>"
+export FIREBOLT_CLIENT_ID="v9JDQeWPkWHyrtMzL4qpqVWHf2tOveIZ"
+export FIREBOLT_CLIENT_SECRET="NXEjJeqpMUxOE_6BF-taWDpKOy0qtt5KYJiKMmR3u_hxSDuWaWWnO45ZXbdAn1Ak"
+export FIREBOLT_ACCOUNT="developer"
+export FIREBOLT_DATABASE="clickbench"

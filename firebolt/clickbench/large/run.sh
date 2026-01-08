@@ -25,7 +25,7 @@ set -euo pipefail
 TRIES=3
 TABLE="hits_1b"
 ENGINE_NAME=""
-SKIP_TABLE_SIZE=false
+LOAD_TIME=0
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -38,25 +38,25 @@ while [[ $# -gt 0 ]]; do
             ENGINE_NAME="$2"
             shift 2
             ;;
-        --skip-table-size)
-            SKIP_TABLE_SIZE=true
-            shift
+        --load-time)
+            LOAD_TIME="$2"
+            shift 2
             ;;
         --help|-h)
-            echo "Usage: ./run.sh --engine ENGINE_NAME [--table TABLE_NAME] [--skip-table-size]"
+            echo "Usage: ./run.sh --engine ENGINE_NAME [--table TABLE_NAME] [--load-time SECONDS]"
             echo ""
             echo "Options:"
             echo "  --engine, -e      Engine name (required)"
             echo "  --table, -t       Table to query (default: hits_1b)"
             echo "                    Options: hits_1b, hits_10b, hits_100b"
-            echo "  --skip-table-size Skip querying table size (faster startup)"
+            echo "  --load-time       Time taken to create/expand the table (seconds)"
             echo ""
             echo "Output is saved to results_{1B,10B,100B}/{engine_name}.json"
             exit 0
             ;;
         *)
             echo "Unknown option: $1" >&2
-            echo "Usage: ./run.sh --engine ENGINE_NAME [--table TABLE_NAME] [--skip-table-size]" >&2
+            echo "Usage: ./run.sh --engine ENGINE_NAME [--table TABLE_NAME] [--load-time SECONDS]" >&2
             exit 1
             ;;
     esac
@@ -97,9 +97,10 @@ OUTPUT_FILE="${OUTPUT_DIR}/${ENGINE_NAME}.json"
 : "${FIREBOLT_DATABASE:?ERROR: Set FIREBOLT_DATABASE}"
 
 echo "=== Firebolt ClickBench Query Runner ===" >&2
-echo "Engine:  $ENGINE_NAME" >&2
-echo "Table:   $TABLE" >&2
-echo "Output:  $OUTPUT_FILE" >&2
+echo "Engine:    $ENGINE_NAME" >&2
+echo "Table:     $TABLE" >&2
+echo "Load Time: ${LOAD_TIME}s" >&2
+echo "Output:    $OUTPUT_FILE" >&2
 echo "" >&2
 
 echo "Authenticating with Firebolt Cloud..." >&2
@@ -152,23 +153,16 @@ ENGINE_FAMILY=$(echo "$ENGINE_INFO" | jq -r '.data[0].family // "unknown"')
 echo "Engine: $ENGINE_NODES nodes, type: $ENGINE_TYPE, family: $ENGINE_FAMILY" >&2
 
 # Get table size (compressed bytes) for cost calculation
-if [ "$SKIP_TABLE_SIZE" = true ]; then
-    echo "Skipping table size query (--skip-table-size)" >&2
-    TABLE_ROWS=0
-    TABLE_UNCOMPRESSED=0
-    TABLE_COMPRESSED=0
-else
-    echo "Getting table size for '$TABLE'..." >&2
-    TABLE_INFO=$(curl -s "https://${USER_ENGINE_URL}&database=${FIREBOLT_DATABASE}" \
-        -H "Authorization: Bearer ${ACCESS_TOKEN}" \
-        --data "SELECT table_name, number_of_rows, uncompressed_bytes, compressed_bytes FROM information_schema.tables WHERE table_name = '${TABLE}'")
+echo "Getting table size for '$TABLE'..." >&2
+TABLE_INFO=$(curl -s "https://${USER_ENGINE_URL}&database=${FIREBOLT_DATABASE}" \
+    -H "Authorization: Bearer ${ACCESS_TOKEN}" \
+    --data "SELECT table_name, number_of_rows, uncompressed_bytes, compressed_bytes FROM information_schema.tables WHERE table_name = '${TABLE}'")
 
-    TABLE_ROWS=$(echo "$TABLE_INFO" | jq -r '.data[0].number_of_rows // 0')
-    TABLE_UNCOMPRESSED=$(echo "$TABLE_INFO" | jq -r '.data[0].uncompressed_bytes // 0')
-    TABLE_COMPRESSED=$(echo "$TABLE_INFO" | jq -r '.data[0].compressed_bytes // 0')
+TABLE_ROWS=$(echo "$TABLE_INFO" | jq -r '.data[0].number_of_rows // 0')
+TABLE_UNCOMPRESSED=$(echo "$TABLE_INFO" | jq -r '.data[0].uncompressed_bytes // 0')
+TABLE_COMPRESSED=$(echo "$TABLE_INFO" | jq -r '.data[0].compressed_bytes // 0')
 
-    echo "Table: $TABLE_ROWS rows, compressed: $TABLE_COMPRESSED bytes, uncompressed: $TABLE_UNCOMPRESSED bytes" >&2
-fi
+echo "Table: $TABLE_ROWS rows, compressed: $TABLE_COMPRESSED bytes, uncompressed: $TABLE_UNCOMPRESSED bytes" >&2
 
 # Query parameters for benchmarking (disable caches for consistent results)
 BASE_QUERY_PARAMS="database=${FIREBOLT_DATABASE}&enable_result_cache=false&enable_subresult_cache=false&output_format=JSON_Compact"
@@ -228,18 +222,6 @@ run_query() {
 # Create output directory
 mkdir -p "$OUTPUT_DIR"
 
-# Warm-up query to get the engine started
-echo "" >&2
-echo "Running warm-up query on '$TABLE'..." >&2
-WARMUP_START=$(date +%s)
-WARMUP_LABEL="{\"benchmark\":\"clickbench\",\"volume\":\"${DATA_VOLUME}\",\"query\":\"warmup\",\"attempt\":1}"
-WARMUP_LABEL_ENCODED=$(printf '%s' "$WARMUP_LABEL" | jq -sRr @uri)
-WARMUP_PARAMS="${BASE_QUERY_PARAMS}&query_label=${WARMUP_LABEL_ENCODED}"
-curl -s "https://${USER_ENGINE_URL}&${WARMUP_PARAMS}" \
-    -H "Authorization: Bearer ${ACCESS_TOKEN}" \
-    --data "SELECT CHECKSUM(*) FROM ${TABLE}" > /dev/null
-WARMUP_END=$(date +%s)
-echo "Warm-up complete ($(( WARMUP_END - WARMUP_START ))s)" >&2
 
 # Count queries
 QUERY_COUNT=$(grep -c '^SELECT' queries.sql || echo 0)
@@ -327,6 +309,7 @@ cat > "$OUTPUT_FILE" <<EOF
     "data_size": $TABLE_COMPRESSED,
     "data_size_uncompressed": $TABLE_UNCOMPRESSED,
     "row_count": $TABLE_ROWS,
+    "load_time": $LOAD_TIME,
     "engine": {
         "name": "$ENGINE_NAME",
         "nodes": $ENGINE_NODES,
