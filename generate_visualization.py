@@ -508,17 +508,32 @@ def generate_html(results: List[Dict], output_path: Path):
             }}
         }};
         
-        // Initialize with all vendors using scale-specific defaults
+        // Initialize with the 100B defaults (20-node enterprise for Firebolt & ClickHouse)
         function initializeDefaults() {{
-            const defaultVendors = ['Firebolt', 'ClickHouse Cloud', 'Snowflake', 'Databricks', 'BigQuery', 'Redshift Serverless'];
-            defaultVendors.forEach(vendor => {{
+            // Force the default scale to 100B on first load
+            selectedScale = '100B';
+
+            // Only pre-load Firebolt and ClickHouse Cloud at 20 nodes on Enterprise pricing
+            const initialDefaults = [
+                {{ vendor: 'Firebolt', config: 'bench2cost_xl_co_20n', tier: 'Enterprise' }},
+                {{ vendor: 'ClickHouse Cloud', config: 'aws.20.236.parallel_replicas', tier: 'Enterprise' }}
+            ];
+
+            // Reset any existing cards before applying defaults
+            document.getElementById('vendorCards').innerHTML = '';
+            activeVendors = [];
+
+            initialDefaults.forEach(({{ vendor, config, tier }}) => {{
                 const configs = getConfigsForVendor(vendor, selectedScale);
-                if (configs.length > 0) {{
-                    const defaults = scaleDefaults[selectedScale]?.[vendor] || {{}};
-                    const config = defaults.config || configs[configs.length - 1];
-                    const tier = defaults.tier || null;
-                    addVendorCard(vendor, config, tier);
-                }}
+                if (configs.length === 0) return;
+
+                // If the desired config is missing, fall back to the largest available
+                const resolvedConfig = configs.includes(config) ? config : configs[configs.length - 1];
+                const resolvedTier = getTiersForConfig(vendor, resolvedConfig, selectedScale).includes(tier)
+                    ? tier
+                    : null;
+
+                addVendorCard(vendor, resolvedConfig, resolvedTier);
             }});
         }}
         
@@ -630,16 +645,15 @@ def generate_html(results: List[Dict], output_path: Path):
         
         // Format config name for display
         function formatConfigName(config) {{
-            // Handle Firebolt configs: bench2cost_xl_co_3n -> XL CO 3 nodes
+            // Handle Firebolt configs: bench2cost_xl_co_3n or bench2cost_l_co_3n -> "3 nodes"
             const fireboltXLMatch = config.match(/bench2cost_xl_co_(\\d+)n/);
             if (fireboltXLMatch) {{
-                return `XL CO ${{fireboltXLMatch[1]}} nodes`;
+                return `${{fireboltXLMatch[1]}} nodes`;
             }}
             
-            // Handle Firebolt configs: bench2cost_l_co_3n -> L CO 3 nodes
             const fireboltLMatch = config.match(/bench2cost_l_co_(\\d+)n/);
             if (fireboltLMatch) {{
-                return `L CO ${{fireboltLMatch[1]}} nodes`;
+                return `${{fireboltLMatch[1]}} nodes`;
             }}
             
             // Handle ClickHouse configs: aws.3.236.parallel_replicas -> 3 nodes
@@ -749,6 +763,7 @@ def generate_html(results: List[Dict], output_path: Path):
                     color: '#E6EDF3',
                     size: 11
                 }},
+                cliponaxis: false,
                 marker: {{
                     size: 16,
                     color: vendorColors[d.vendor] || '#888',
@@ -915,6 +930,7 @@ def generate_html(results: List[Dict], output_path: Path):
                 text: sorted.map(d => `${{d.relative.toFixed(1)}}×`),
                 textposition: 'outside',
                 textfont: {{ color: '#E6EDF3' }},
+                cliponaxis: false,
                 hovertemplate: '<b>%{{x}}</b><br>Cost-Perf Score: %{{y:.2f}}× baseline<extra></extra>'
             }};
             
